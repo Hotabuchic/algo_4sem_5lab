@@ -134,12 +134,16 @@ def optimized_spa(X, y, n_iter=50, n_features=5, p=1.3):
     best_ri = -1
     best_features = None
 
+    if n_features >= 17:
+        n_iter = 1
+    elif n_features == 16:
+        n_iter = 17
+
     for _ in tqdm(range(n_iter), desc="SPA поиск"):
         while True:
             features = tuple(sorted(np.random.choice(X.shape[1], n_features, replace=False)))
             if features not in feature_cache:
                 break
-
         model = FastISODATA(p=p)
         labels = model.fit_predict(X[:, features])
         ari = adjusted_rand_score(y, labels)

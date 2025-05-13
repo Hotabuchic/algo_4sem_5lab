@@ -1,19 +1,14 @@
-import hashlib
 import sys
 import pandas as pd
 import numpy as np
-import time
-from scipy.io import arff
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QFormLayout, QPlainTextEdit,
     QPushButton, QLineEdit, QFileDialog, QTableView,
-    QSizePolicy, QHeaderView, QSpacerItem, QMessageBox
+    QSizePolicy, QHeaderView, QMessageBox
 )
 from PyQt5.QtGui import QStandardItemModel, QStandardItem
 from sklearn.cluster import KMeans
-from sklearn.metrics import matthews_corrcoef, confusion_matrix, adjusted_rand_score
-from scipy.optimize import linear_sum_assignment
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler
 
 from isodata import FastISODATA, optimized_spa
 
@@ -21,7 +16,7 @@ from isodata import FastISODATA, optimized_spa
 class DatasetClusterApp(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Кластеризация данных")
+        self.setWindowTitle("Кластеризация")
         self.resize(900, 350)
 
         self.loadedDataFrame = pd.DataFrame()
@@ -35,15 +30,15 @@ class DatasetClusterApp(QWidget):
         controlLayout = QFormLayout()
         controlPanel.setLayout(controlLayout)
 
-        self.buttonLoadCsv = QPushButton("Загрузить датасет")
+        self.buttonLoadCsv = QPushButton("Загрузить")
         self.buttonLoadCsv.clicked.connect(self.handleLoad)
         controlLayout.addRow(self.buttonLoadCsv)
 
-        self.buttonDeidentify = QPushButton("Обезличить датасет")
+        self.buttonDeidentify = QPushButton("Обезличить")
         self.buttonDeidentify.clicked.connect(self.anonymize_dataframe)
         controlLayout.addRow(self.buttonDeidentify)
 
-        self.buttonRunClustering = QPushButton("Запустить кластеризацию")
+        self.buttonRunClustering = QPushButton("Запустить")
         self.buttonRunClustering.clicked.connect(self.handleRunClustering)
         controlLayout.addRow(self.buttonRunClustering)
 
@@ -52,8 +47,6 @@ class DatasetClusterApp(QWidget):
 
         self.textStatusOutput = QPlainTextEdit()
         self.textStatusOutput.setReadOnly(True)
-        self.textStatusOutput.setStyleSheet("background-color: #f0f0f0;")
-        self.textStatusOutput.setFixedHeight(180)
         controlLayout.addRow(self.textStatusOutput)
 
         self.tableViewData = QTableView()
@@ -100,15 +93,13 @@ class DatasetClusterApp(QWidget):
         X_scaled = scaler.fit_transform(X)
 
         model_full = FastISODATA()
-        res = model_full.fit_predict(X_scaled, y)
-        print(res)
+        model_full.fit_predict(X_scaled, y)
 
         best_feats, best_ari, best_ri = optimized_spa(X_scaled, y, n_iter=50, n_features=n_features, p=1.3)
 
         X_selected = X_scaled[:, best_feats]
         model_selected = FastISODATA()
         model_selected.fit_predict(X_selected, y)
-
 
         self.textStatusOutput.setPlainText(
             f"Кластеризация на {n_features} признаках\n"
@@ -119,34 +110,9 @@ class DatasetClusterApp(QWidget):
         )
 
     def anonymize_dataframe(self):
-        if self.loadedDataFrame.empty:
-            QMessageBox.warning(self, "Ошибка", "Датасет не загружен.")
-            return
-
-        anonymized = self.loadedDataFrame.copy()
-
-        numeric_cols = anonymized.select_dtypes(include=np.number).columns.tolist()
-
-        for col in numeric_cols:
-            # Пропорциональный шум (10% от std)
-            std = anonymized[col].std()
-            noise = np.random.normal(0, std * 0.1, size=len(anonymized))
-            anonymized[col] = anonymized[col] + noise
-
-            # Особые правила для определенных колонок
-            if 'BALANCE' in col or 'PURCHASES' in col or 'CASH_ADVANCE' in col:
-                # Логарифмирование для больших значений
-                anonymized[col] = np.log1p(anonymized[col])
-
-            elif 'FREQUENCY' in col or 'TRX' in col:
-                # Округление частотных показателей
-                anonymized[col] = anonymized[col].round(0)
-
-            elif 'CREDIT_LIMIT' in col or 'PAYMENTS' in col:
-                # Биннинг чувствительных финансовых данных
-                anonymized[col] = pd.qcut(anonymized[col], q=5, labels=False, duplicates='drop')
-
-        self.loadedDataFrame = anonymized.fillna(0)
+        self.loadedDataFrame = self.loadedDataFrame.copy().apply(lambda col:
+                                       (col // (col.std() / 3)) * (col.std() / 3)
+                                       )
         self.updateTableView()
 
 
