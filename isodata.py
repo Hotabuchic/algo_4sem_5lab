@@ -7,10 +7,10 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
-class FastISODATA:
+class ISODATA:
     def __init__(self, init_k=7, max_iter=100, p=1.3,
                  merge_threshold=0.5, split_threshold=1.5,
-                 min_cluster_size=3, max_clusters=10):
+                 min_cluster_size=3, min_clusters=3, max_clusters=12):
         self.init_k = init_k
         self.max_iter = max_iter
         self.p = p
@@ -18,6 +18,7 @@ class FastISODATA:
         self.split_threshold = split_threshold
         self.min_cluster_size = min_cluster_size
         self.max_clusters = max_clusters
+        self.min_clusters = min_clusters
         self.centers = None
         self.ari = None
         self.ri = None
@@ -98,7 +99,12 @@ class FastISODATA:
             unique, counts = np.unique(labels, return_counts=True)
             valid_clusters = unique[counts >= self.min_cluster_size]
             if len(valid_clusters) < len(self.centers):
-                self.centers = self.centers[valid_clusters]
+                if len(valid_clusters) >= self.min_clusters:
+                    self.centers = self.centers[valid_clusters]
+                else:
+                    # Оставляем min_clusters самых больших кластеров
+                    largest_clusters = np.argsort(counts)[-self.min_clusters:]
+                    self.centers = self.centers[largest_clusters]
                 distances = cdist(X, self.centers, metric='minkowski', p=self.p)
                 labels = np.argmin(distances, axis=1)
 
@@ -106,15 +112,19 @@ class FastISODATA:
             new_centers = np.array([X[labels == i].mean(axis=0) for i in range(len(self.centers))])
 
             # Шаг 4: Слияние кластеров
-            if len(self.centers) > 1:
+            if len(self.centers) > self.min_clusters:
                 new_centers = self._merge_clusters(X, labels)
+                if len(new_centers) < self.min_clusters:
+                    new_centers = self.centers
 
             # Шаг 5: Разделение кластеров
             if len(new_centers) < self.max_clusters:
                 new_centers = self._split_clusters(X, labels)
+                if len(new_centers) > self.max_clusters:
+                    new_centers = new_centers[:self.max_clusters]
 
             # Проверка сходимости
-            if len(new_centers) == len(self.centers) and np.allclose(self.centers, new_centers):
+            if len(new_centers) == len(self.centers) and np.allclose(self.centers, new_centers) and len(new_centers) >= self.min_clusters:
                 break
 
             self.centers = new_centers
@@ -122,13 +132,18 @@ class FastISODATA:
         # Финальное назначение меток
         final_labels = np.argmin(cdist(X, self.centers, metric='minkowski', p=self.p), axis=1)
 
+        if len(self.centers) < self.min_clusters:
+            # Выбираем min_clusters случайных точек как центры
+            self.centers = X[np.random.choice(X.shape[0], self.min_clusters, replace=False)]
+            final_labels = np.argmin(cdist(X, self.centers, metric='minkowski', p=self.p), axis=1)
+
         if y_true is not None:
             self.ari = adjusted_rand_score(y_true, final_labels)
             self.ri = rand_score(y_true, final_labels)
         return final_labels
 
 
-def optimized_spa(X, y, n_iter=50, n_features=5, p=1.3):
+def optimized_spa(X, y, n_iter=50, n_features=5, p=1.3, init_k=7, min_clusters=3, max_clusters=12):
     feature_cache = {}
     best_ari = -1
     best_ri = -1
@@ -136,7 +151,7 @@ def optimized_spa(X, y, n_iter=50, n_features=5, p=1.3):
 
     if n_features >= 17:
         n_iter = 1
-    elif n_features == 16:
+    elif n_features == 16 or n_features == 1:
         n_iter = 17
 
     for _ in tqdm(range(n_iter), desc="SPA поиск"):
@@ -144,13 +159,13 @@ def optimized_spa(X, y, n_iter=50, n_features=5, p=1.3):
             features = tuple(sorted(np.random.choice(X.shape[1], n_features, replace=False)))
             if features not in feature_cache:
                 break
-        model = FastISODATA(p=p)
+        model = ISODATA(p=p, init_k=init_k, min_clusters=min_clusters, max_clusters=max_clusters)
         labels = model.fit_predict(X[:, features])
         ari = adjusted_rand_score(y, labels)
         ri = rand_score(y, labels)
         feature_cache[features] = {'ari': ari, 'ri': ri}
 
-        if ari > best_ari:
+        if ri > best_ri:
             best_ari = ari
             best_ri = ri
             best_features = features
